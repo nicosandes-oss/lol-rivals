@@ -526,6 +526,17 @@ app.get("/api/build-stats", async (req, res) => {
     const lethalityIds = new Set(LETHALITY_ITEM_NAMES.map((n) => itemNameToId[n]).filter(Boolean));
     const adHpIds = new Set(AD_HP_ITEM_NAMES.map((n) => itemNameToId[n]).filter(Boolean));
 
+    // Sanity check: if a name in either list doesn't exactly match Data
+    // Dragon's current item.json (renamed/reworked item, typo, etc.), it
+    // silently resolves to nothing and that item can never be detected.
+    // Surfacing this in the response makes that failure visible instead of
+    // looking identical to "this matchup is just rare."
+    const unresolvedLethality = LETHALITY_ITEM_NAMES.filter((n) => !itemNameToId[n]);
+    const unresolvedAdHp = AD_HP_ITEM_NAMES.filter((n) => !itemNameToId[n]);
+    if (unresolvedLethality.length || unresolvedAdHp.length) {
+      console.warn("[build-stats] Item names not found in Data Dragon:", { unresolvedLethality, unresolvedAdHp });
+    }
+
     const puuid = await getPuuid(riotId, continent);
     const matchIds = await getMatchIdsInWindow(puuid, LOOKBACK_DAYS, continent);
     const capped = matchIds.slice(0, MAX_SHARED_MATCHES_TO_FETCH);
@@ -561,6 +572,7 @@ app.get("/api/build-stats", async (req, res) => {
       truncated,
       totalMatchesChecked: capped.length,
       skipped,
+      itemsResolved: { lethality: lethalityIds.size, adHp: adHpIds.size },
     });
   } catch (err) {
     console.error(err);
