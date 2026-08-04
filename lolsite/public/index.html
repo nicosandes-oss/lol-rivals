@@ -625,7 +625,8 @@
       const totalGames = lethalityAlly.wins + lethalityAlly.losses + adHpAlly.wins + adHpAlly.losses;
 
       if (totalGames === 0) {
-        buildStatsResultsEl.innerHTML = `<div class="status-msg">No clean lethality-vs-bruiser matchup (mid+jungle) in the last ${lookbackDays} days. Checked ${data.totalMatchesChecked} game${data.totalMatchesChecked === 1 ? "" : "s"}, all ${skipped} skipped (mixed or unclear builds, or player not found in match).</div>`;
+        const { lethality, adHp } = data.itemsResolved || {};
+        buildStatsResultsEl.innerHTML = `<div class="status-msg">No clean lethality-vs-bruiser matchup (mid+jungle) in the last ${lookbackDays} days. Checked ${data.totalMatchesChecked} game${data.totalMatchesChecked === 1 ? "" : "s"}, all ${skipped} skipped (mixed or unclear builds, or player not found in match). Items recognized: ${lethality} lethality, ${adHp} bruiser.</div>`;
         return;
       }
 
