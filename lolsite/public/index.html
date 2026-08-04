@@ -20,13 +20,22 @@
     --stripe-a-wins: #E63DD8;
   }
   * { box-sizing: border-box; }
-  body {
+body {
     margin: 0;
     font-family: 'Segoe UI', system-ui, sans-serif;
-    background: var(--bg);
+
+    background:
+        linear-gradient(rgba(8, 12, 20, 0.82), rgba(8, 12, 20, 0.82)),
+        url("sitethemebackground.png");
+
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+
     color: var(--text);
     padding: 28px 20px 60px;
-  }
+}
   .shell { max-width: 760px; margin: 0 auto; }
   .eyebrow {
     font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase;
