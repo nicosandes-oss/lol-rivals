@@ -303,6 +303,19 @@
       <button class="search-btn" id="champStatsBtn">Check win rate</button>
       <div id="champStatsResults"></div>
     </div>
+
+    <div class="champ-stats-card">
+      <div class="champ-stats-title">Summoner's WR: lethality team vs bruiser team (mid+jungle)</div>
+      <div class="champ-stats-row">
+        <div class="input-wrap">
+          <span class="fighter-label" style="color: var(--text-dim)">Summoner</span>
+          <div class="fighter-field"><input id="buildStatsName" type="text" placeholder="Name#Tag" autocomplete="off" /></div>
+          <div class="suggest-list" id="suggestBuildName"></div>
+        </div>
+      </div>
+      <button class="search-btn" id="buildStatsBtn">Check win rate</button>
+      <div id="buildStatsResults"></div>
+    </div>
   </div>
 
   <script>
@@ -564,6 +577,92 @@
     [champStatsNameInput, champStatsChampInput].forEach((el) =>
       el.addEventListener("keydown", (e) => { if (e.key === "Enter") searchChampionStats(); })
     );
+
+    // ---------------------------------------------------------------------
+    // Lethality vs AD+HP team build win/loss lookup
+    // ---------------------------------------------------------------------
+    const buildStatsNameInput = document.getElementById("buildStatsName");
+    const buildStatsBtn = document.getElementById("buildStatsBtn");
+    const buildStatsResultsEl = document.getElementById("buildStatsResults");
+    const suggestBuildName = document.getElementById("suggestBuildName");
+
+    wireAutocomplete(buildStatsNameInput, suggestBuildName, fetchNameSuggestions);
+
+    async function searchBuildStats() {
+      const name = buildStatsNameInput.value.trim();
+      const region = document.getElementById("regionSelect").value;
+      if (!name) return;
+
+      buildStatsBtn.disabled = true;
+      buildStatsBtn.textContent = "Checking...";
+      buildStatsResultsEl.innerHTML = `<div class="status-msg">Checking recent games&hellip; this can take a little while.</div>`;
+
+      try {
+        const url = "/api/build-stats?name=" + encodeURIComponent(name) + "&region=" + region;
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (!res.ok) {
+          buildStatsResultsEl.innerHTML = `<div class="status-msg error">${data.error || "Something went wrong."}</div>`;
+        } else {
+          renderBuildStats(data, name);
+          const shareUrl = new URL(window.location.href);
+          shareUrl.search = "";
+          shareUrl.searchParams.set("buildStatsName", name);
+          if (region !== "americas") shareUrl.searchParams.set("region", region);
+          window.history.replaceState({}, "", shareUrl.toString());
+        }
+      } catch (err) {
+        buildStatsResultsEl.innerHTML = `<div class="status-msg error">Network error: ${err.message}</div>`;
+      } finally {
+        buildStatsBtn.disabled = false;
+        buildStatsBtn.textContent = "Check win rate";
+      }
+    }
+
+    function renderBuildStats(data, name) {
+      const { lethalityAlly, adHpAlly, lookbackDays, truncated, skipped } = data;
+      const totalGames = lethalityAlly.wins + lethalityAlly.losses + adHpAlly.wins + adHpAlly.losses;
+
+      if (totalGames === 0) {
+        buildStatsResultsEl.innerHTML = `<div class="status-msg">No games in the last ${lookbackDays} days had a clean lethality-vs-AD+HP matchup (mid+jungle) on either side.</div>`;
+        return;
+      }
+
+      buildStatsResultsEl.innerHTML = `
+        <div class="share-row">
+          <button class="copy-link-btn" id="buildStatsCopyBtn">Copy link to this result</button>
+        </div>
+        ${buildWrBar(name, "team lethality vs enemy bruiser", lethalityAlly)}
+        ${buildWrBar(name, "team bruiser vs enemy lethality", adHpAlly)}
+        <div class="wr-bar-caption" style="margin-top: 4px;">
+          last ${lookbackDays} days &middot; ${skipped} game${skipped === 1 ? "" : "s"} skipped (mixed or unclear builds)${truncated ? " &middot; showing most recent matches checked" : ""}
+        </div>
+      `;
+
+      const copyBtn = document.getElementById("buildStatsCopyBtn");
+      copyBtn.addEventListener("click", () => {
+        const shareUrl = new URL(window.location.href);
+        shareUrl.search = "";
+        shareUrl.searchParams.set("buildStatsName", name);
+        const region = document.getElementById("regionSelect").value;
+        if (region !== "americas") shareUrl.searchParams.set("region", region);
+
+        navigator.clipboard.writeText(shareUrl.toString()).then(() => {
+          copyBtn.textContent = "Link copied";
+          copyBtn.classList.add("copied");
+          setTimeout(() => {
+            copyBtn.textContent = "Copy link to this result";
+            copyBtn.classList.remove("copied");
+          }, 2000);
+        }).catch(() => {
+          copyBtn.textContent = "Couldn't copy — copy from address bar";
+        });
+      });
+    }
+
+    buildStatsBtn.addEventListener("click", searchBuildStats);
+    buildStatsNameInput.addEventListener("keydown", (e) => { if (e.key === "Enter") searchBuildStats(); });
 
     const QUEUE_NAMES = {
       400: "Normal Draft", 420: "Ranked Solo/Duo", 430: "Normal Blind",
@@ -873,6 +972,12 @@
         champStatsNameInput.value = champName;
         champStatsChampInput.value = champ;
         championListReady.then(() => searchChampionStats());
+      }
+
+      const buildStatsName = params.get("buildStatsName");
+      if (buildStatsName) {
+        buildStatsNameInput.value = buildStatsName;
+        searchBuildStats();
       }
     })();
   </script>
