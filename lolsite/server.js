@@ -124,9 +124,49 @@ async function getMatchIdsInWindow(puuid, lookbackDays, continent) {
   return allIds;
 }
 
+// Matches are immutable once the game is over, so caching them by ID is
+// always safe — no expiry needed. This also means repeated or overlapping
+// lookups (e.g. two players who share matches) skip the network entirely
+// on the second hit. Lives in memory only, same tradeoff as searchHistory
+// above: resets on redeploy, which is fine since it's just a speed boost.
+const matchCache = new Map(); // matchId -> match data
+const MAX_MATCH_CACHE_SIZE = 5000;
+
 async function getMatch(matchId, continent) {
+  const cached = matchCache.get(matchId);
+  if (cached) return cached;
+
   const url = `https://${continent}.api.riotgames.com/lol/match/v5/matches/${matchId}`;
-  return riotFetch(url);
+  const data = await riotFetch(url);
+
+  if (matchCache.size >= MAX_MATCH_CACHE_SIZE) {
+    matchCache.delete(matchCache.keys().next().value); // drop oldest entry
+  }
+  matchCache.set(matchId, data);
+
+  return data;
+}
+
+// How many matches to fetch at once. Riot's personal API key allows 20
+// requests/second — 10 concurrent leaves headroom for the account/match-ids
+// calls happening around it, while still being ~10x faster wall-clock than
+// fetching one at a time.
+const MATCH_FETCH_CONCURRENCY = 10;
+
+// Fetches a list of match IDs in parallel batches (instead of one at a time)
+// and calls onMatch(matchData, matchId) for each as it resolves. Order of
+// onMatch calls is not guaranteed to match matchIds order — callers that
+// need original order should sort afterward (e.g. by gameCreation).
+async function getMatchesBatched(matchIds, continent, onMatch) {
+  for (let i = 0; i < matchIds.length; i += MATCH_FETCH_CONCURRENCY) {
+    const batch = matchIds.slice(i, i + MATCH_FETCH_CONCURRENCY);
+    const results = await Promise.all(
+      batch.map((matchId) => getMatch(matchId, continent).then((data) => ({ matchId, data })))
+    );
+    for (const { matchId, data } of results) {
+      onMatch(data, matchId);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -338,12 +378,10 @@ app.get("/api/matchup", async (req, res) => {
     sharedIds = sharedIds.slice(0, MAX_SHARED_MATCHES_TO_FETCH);
 
     let matches = [];
-    for (const matchId of sharedIds) {
-      const matchData = await getMatch(matchId, continent);
+    await getMatchesBatched(sharedIds, continent, (matchData) => {
       const h2h = extractHeadToHead(matchData, puuidA, puuidB);
       if (h2h) matches.push(h2h);
-      await new Promise((r) => setTimeout(r, 50)); // be gentle with rate limits
-    }
+    });
 
     matches.sort((m1, m2) => m2.gameCreation - m1.gameCreation);
 
@@ -423,25 +461,22 @@ app.get("/api/champion-stats", async (req, res) => {
     const withTeam = { wins: 0, losses: 0 };
     const against = { wins: 0, losses: 0 };
 
-    for (const matchId of capped) {
-      const matchData = await getMatch(matchId, continent);
-      await new Promise((r) => setTimeout(r, 50));
-
+    await getMatchesBatched(capped, continent, (matchData) => {
       const self = matchData.info.participants.find((pp) => pp.puuid === puuid);
-      if (!self) continue;
+      if (!self) return;
 
       // Self played this champion — excluded from both buckets per the
       // feature's definition (this stat is about facing/playing alongside
       // the champion, not piloting it themselves).
-      if (self.championName === champion) continue;
+      if (self.championName === champion) return;
 
       const champPlayer = matchData.info.participants.find((pp) => pp.championName === champion);
-      if (!champPlayer) continue; // champion wasn't in this match at all
+      if (!champPlayer) return; // champion wasn't in this match at all
 
       const isAlly = champPlayer.teamId === self.teamId;
       const bucket = isAlly ? withTeam : against;
       if (self.win) bucket.wins++; else bucket.losses++;
-    }
+    });
 
     recordSearchedName(riotId);
 
@@ -500,12 +535,9 @@ app.get("/api/build-stats", async (req, res) => {
     const adHpAlly = { wins: 0, losses: 0 };
     let skipped = 0;
 
-    for (const matchId of capped) {
-      const matchData = await getMatch(matchId, continent);
-      await new Promise((r) => setTimeout(r, 50));
-
+    await getMatchesBatched(capped, continent, (matchData) => {
       const self = matchData.info.participants.find((pp) => pp.puuid === puuid);
-      if (!self) { skipped++; continue; }
+      if (!self) { skipped++; return; }
 
       const ownTeam = matchData.info.participants.filter((pp) => pp.teamId === self.teamId);
       const enemyTeam = matchData.info.participants.filter((pp) => pp.teamId !== self.teamId);
@@ -513,11 +545,11 @@ app.get("/api/build-stats", async (req, res) => {
       const ownBuild = classifyTeamBuild(ownTeam, lethalityIds, adHpIds);
       const enemyBuild = classifyTeamBuild(enemyTeam, lethalityIds, adHpIds);
 
-      if (!ownBuild || !enemyBuild || ownBuild === enemyBuild) { skipped++; continue; }
+      if (!ownBuild || !enemyBuild || ownBuild === enemyBuild) { skipped++; return; }
 
       const bucket = ownBuild === "lethality" ? lethalityAlly : adHpAlly;
       if (self.win) bucket.wins++; else bucket.losses++;
-    }
+    });
 
     recordSearchedName(riotId);
 
