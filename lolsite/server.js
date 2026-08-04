@@ -129,6 +129,88 @@ async function getMatch(matchId, continent) {
   return riotFetch(url);
 }
 
+// ---------------------------------------------------------------------------
+// Item name -> item ID lookup, via Data Dragon (Riot's static data CDN)
+// ---------------------------------------------------------------------------
+// Item IDs are stable across patches, but resolving them by NAME instead of
+// hardcoding numbers means this keeps working if an item ever gets a new ID
+// (happens occasionally on reworks) without needing a code change — just
+// restart the server and it re-fetches the current patch's item list.
+//
+// To add/remove items from either bucket, only edit the two name lists below.
+// Names must match Data Dragon's item.json exactly (check
+// https://ddragon.leagueoflegends.com/cdn/<version>/data/en_US/item.json).
+const LETHALITY_ITEM_NAMES = [
+  "Youmuu's Ghostblade",
+  "Duskblade of Draktharr",
+  "Prowler's Claw",
+  "Edge of Night",
+  "Serylda's Grudge",
+  "Umbral Glaive",
+  "Serpent's Fang",
+  "Hubris",
+  "Opportunity",
+];
+
+const AD_HP_ITEM_NAMES = [
+  "Trinity Force",
+  "Sterak's Gage",
+  "Stridebreaker",
+  "Black Cleaver",
+  "Sundered Sky",
+  "Dead Man's Plate",
+  "Heartsteel",
+];
+
+let itemNameToIdCache = null; // { "Youmuu's Ghostblade": 3142, ... }
+
+async function getItemNameToIdMap() {
+  if (itemNameToIdCache) return itemNameToIdCache;
+
+  const versionsRes = await fetch("https://ddragon.leagueoflegends.com/api/versions.json");
+  const versions = await versionsRes.json();
+  const latest = versions[0];
+
+  const itemsRes = await fetch(`https://ddragon.leagueoflegends.com/cdn/${latest}/data/en_US/item.json`);
+  const itemsData = await itemsRes.json();
+
+  const map = {};
+  for (const [id, data] of Object.entries(itemsData.data)) {
+    map[data.name] = parseInt(id, 10);
+  }
+  itemNameToIdCache = map;
+  return map;
+}
+
+// How many items from the relevant bucket a team's mid+jungle need, combined,
+// to count as "building" that style. 2 is enough to mean "a deliberate
+// pattern," not just one player picking up a single situational item.
+const BUILD_CLASSIFICATION_THRESHOLD = 2;
+
+// Looks at a team's mid + jungle players' final item slots (item0-item5;
+// item6 is the trinket, skipped) and classifies the team as "lethality",
+// "adHp", or null (didn't clearly commit to either pattern).
+function classifyTeamBuild(teamParticipants, lethalityIds, adHpIds) {
+  const relevant = teamParticipants.filter(
+    (p) => p.teamPosition === "MIDDLE" || p.summoner1Id === SMITE_SPELL_ID || p.summoner2Id === SMITE_SPELL_ID
+  );
+
+  let lethalityCount = 0;
+  let adHpCount = 0;
+
+  for (const p of relevant) {
+    const items = [p.item0, p.item1, p.item2, p.item3, p.item4, p.item5];
+    for (const itemId of items) {
+      if (lethalityIds.has(itemId)) lethalityCount++;
+      if (adHpIds.has(itemId)) adHpCount++;
+    }
+  }
+
+  if (lethalityCount >= BUILD_CLASSIFICATION_THRESHOLD && lethalityCount > adHpCount) return "lethality";
+  if (adHpCount >= BUILD_CLASSIFICATION_THRESHOLD && adHpCount > lethalityCount) return "adHp";
+  return null;
+}
+
 // Smite's summonerId in Riot's API. This is one of the oldest, most stable
 // numeric IDs in the whole API (predates match-v5 itself) — equipping it
 // is a more reliable jungle signal than teamPosition/individualPosition,
@@ -371,6 +453,82 @@ app.get("/api/champion-stats", async (req, res) => {
       lookbackDays: LOOKBACK_DAYS,
       truncated,
       totalMatchesChecked: capped.length,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(err.status || 500).json({ error: err.message || "Something went wrong." });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Single-player win/loss split by lethality-vs-AD+HP team build matchup
+// ---------------------------------------------------------------------------
+// GET /api/build-stats?name=Name#Tag
+//
+// For each match, mid+jungle on each team are checked against the lethality
+// and AD+HP item lists (see LETHALITY_ITEM_NAMES / AD_HP_ITEM_NAMES above).
+// A team only counts as "lethality" or "adHp" if it clearly committed to one
+// (BUILD_CLASSIFICATION_THRESHOLD) — mixed or unclear builds are skipped.
+//
+// Two buckets returned:
+//   - lethalityAlly  — player's team went lethality, enemy went AD+HP
+//   - adHpAlly       — player's team went AD+HP, enemy went lethality
+// Matches where either team didn't clearly commit, or where both teams
+// went the same way, are skipped (not counted in either bucket).
+app.get("/api/build-stats", async (req, res) => {
+  const riotId = req.query.name;
+  const continent = VALID_CONTINENTS.has(req.query.region) ? req.query.region : DEFAULT_CONTINENT;
+
+  if (!RIOT_API_KEY) {
+    return res.status(500).json({ error: "Server is missing RIOT_API_KEY. Set it in your host's environment variables." });
+  }
+  if (!riotId) {
+    return res.status(400).json({ error: "Provide ?name=Name#Tag" });
+  }
+
+  try {
+    const itemNameToId = await getItemNameToIdMap();
+    const lethalityIds = new Set(LETHALITY_ITEM_NAMES.map((n) => itemNameToId[n]).filter(Boolean));
+    const adHpIds = new Set(AD_HP_ITEM_NAMES.map((n) => itemNameToId[n]).filter(Boolean));
+
+    const puuid = await getPuuid(riotId, continent);
+    const matchIds = await getMatchIdsInWindow(puuid, LOOKBACK_DAYS, continent);
+    const capped = matchIds.slice(0, MAX_SHARED_MATCHES_TO_FETCH);
+    const truncated = matchIds.length > MAX_SHARED_MATCHES_TO_FETCH;
+
+    const lethalityAlly = { wins: 0, losses: 0 };
+    const adHpAlly = { wins: 0, losses: 0 };
+    let skipped = 0;
+
+    for (const matchId of capped) {
+      const matchData = await getMatch(matchId, continent);
+      await new Promise((r) => setTimeout(r, 50));
+
+      const self = matchData.info.participants.find((pp) => pp.puuid === puuid);
+      if (!self) { skipped++; continue; }
+
+      const ownTeam = matchData.info.participants.filter((pp) => pp.teamId === self.teamId);
+      const enemyTeam = matchData.info.participants.filter((pp) => pp.teamId !== self.teamId);
+
+      const ownBuild = classifyTeamBuild(ownTeam, lethalityIds, adHpIds);
+      const enemyBuild = classifyTeamBuild(enemyTeam, lethalityIds, adHpIds);
+
+      if (!ownBuild || !enemyBuild || ownBuild === enemyBuild) { skipped++; continue; }
+
+      const bucket = ownBuild === "lethality" ? lethalityAlly : adHpAlly;
+      if (self.win) bucket.wins++; else bucket.losses++;
+    }
+
+    recordSearchedName(riotId);
+
+    res.json({
+      riotId,
+      lethalityAlly,
+      adHpAlly,
+      lookbackDays: LOOKBACK_DAYS,
+      truncated,
+      totalMatchesChecked: capped.length,
+      skipped,
     });
   } catch (err) {
     console.error(err);
