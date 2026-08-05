@@ -222,33 +222,37 @@ async function getItemNameToIdMap() {
   return map;
 }
 
-// How many items from the relevant bucket a team's mid+jungle need, combined,
-// to count as "building" that style. 2 is enough to mean "a deliberate
-// pattern," not just one player picking up a single situational item.
-const BUILD_CLASSIFICATION_THRESHOLD = 2;
+// How many items from a bucket a single player (mid or jungle) needs on
+// their own to count as "building" that style. 1 is enough to mean "picked
+// this up" — each role is checked independently, not summed with the other.
+const BUILD_CLASSIFICATION_THRESHOLD = 1;
 
-// Looks at a team's mid + jungle players' final item slots (item0-item5;
-// item6 is the trinket, skipped) and classifies the team as "lethality",
-// "adHp", or null (didn't clearly commit to either pattern).
+// Looks at a team's mid + jungle players individually (item0-item5 each;
+// item6 is the trinket, skipped). Returns { hasLethality, hasBruiser } —
+// true if EITHER player on their own hit the threshold for that bucket.
+// The two flags aren't mutually exclusive: a team can show both if, say,
+// jungle went lethality and mid went bruiser.
 function classifyTeamBuild(teamParticipants, lethalityIds, adHpIds) {
   const relevant = teamParticipants.filter(
     (p) => p.teamPosition === "MIDDLE" || p.summoner1Id === SMITE_SPELL_ID || p.summoner2Id === SMITE_SPELL_ID
   );
 
-  let lethalityCount = 0;
-  let adHpCount = 0;
+  let hasLethality = false;
+  let hasBruiser = false;
 
   for (const p of relevant) {
     const items = [p.item0, p.item1, p.item2, p.item3, p.item4, p.item5];
+    let playerLethalityCount = 0;
+    let playerAdHpCount = 0;
     for (const itemId of items) {
-      if (lethalityIds.has(itemId)) lethalityCount++;
-      if (adHpIds.has(itemId)) adHpCount++;
+      if (lethalityIds.has(itemId)) playerLethalityCount++;
+      if (adHpIds.has(itemId)) playerAdHpCount++;
     }
+    if (playerLethalityCount >= BUILD_CLASSIFICATION_THRESHOLD) hasLethality = true;
+    if (playerAdHpCount >= BUILD_CLASSIFICATION_THRESHOLD) hasBruiser = true;
   }
 
-  if (lethalityCount >= BUILD_CLASSIFICATION_THRESHOLD && lethalityCount > adHpCount) return "lethality";
-  if (adHpCount >= BUILD_CLASSIFICATION_THRESHOLD && adHpCount > lethalityCount) return "adHp";
-  return null;
+  return { hasLethality, hasBruiser };
 }
 
 // Smite's summonerId in Riot's API. This is one of the oldest, most stable
@@ -556,10 +560,20 @@ app.get("/api/build-stats", async (req, res) => {
       const ownBuild = classifyTeamBuild(ownTeam, lethalityIds, adHpIds);
       const enemyBuild = classifyTeamBuild(enemyTeam, lethalityIds, adHpIds);
 
-      if (!ownBuild || !enemyBuild || ownBuild === enemyBuild) { skipped++; return; }
+      let counted = false;
 
-      const bucket = ownBuild === "lethality" ? lethalityAlly : adHpAlly;
-      if (self.win) bucket.wins++; else bucket.losses++;
+      // Own team showed lethality (mid or jg), enemy team showed bruiser (mid or jg).
+      if (ownBuild.hasLethality && enemyBuild.hasBruiser) {
+        if (self.win) lethalityAlly.wins++; else lethalityAlly.losses++;
+        counted = true;
+      }
+      // The reverse: own team showed bruiser, enemy team showed lethality.
+      if (ownBuild.hasBruiser && enemyBuild.hasLethality) {
+        if (self.win) adHpAlly.wins++; else adHpAlly.losses++;
+        counted = true;
+      }
+
+      if (!counted) skipped++;
     });
 
     recordSearchedName(riotId);
