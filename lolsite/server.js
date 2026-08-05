@@ -218,6 +218,13 @@ async function getItemNameToIdMap() {
 
   const map = {};
   for (const [id, data] of Object.entries(itemsData.data)) {
+    // Data Dragon can list multiple entries with the same display name
+    // (Arena-mode variants, deprecated/legacy versions, etc.) but different
+    // numeric IDs. Only accept an entry as authoritative if it's actually
+    // available on Summoner's Rift (map "11") — otherwise a later duplicate
+    // entry can silently overwrite the real SR item ID with an unrelated one.
+    const availableOnSR = data.maps && data.maps["11"] === true;
+    if (!availableOnSR) continue;
     map[data.name] = parseInt(id, 10);
   }
   itemNameToIdCache = map;
