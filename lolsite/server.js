@@ -190,6 +190,7 @@ const LETHALITY_ITEM_NAMES = [
   "Serpent's Fang",
   "Hubris",
   "Opportunity",
+  "Eclipse",
 ];
 
 const AD_HP_ITEM_NAMES = [
@@ -200,6 +201,7 @@ const AD_HP_ITEM_NAMES = [
   "Sundered Sky",
   "Dead Man's Plate",
   "Heartsteel",
+  "Death's Dance",
 ];
 
 let itemNameToIdCache = null; // { "Youmuu's Ghostblade": 3142, ... }
@@ -234,7 +236,7 @@ const BUILD_CLASSIFICATION_THRESHOLD = 1;
 // jungle went lethality and mid went bruiser.
 function classifyTeamBuild(teamParticipants, lethalityIds, adHpIds) {
   const relevant = teamParticipants.filter(
-    (p) => p.teamPosition === "MIDDLE" || p.summoner1Id === SMITE_SPELL_ID || p.summoner2Id === SMITE_SPELL_ID
+    (p) => p.teamPosition === "MIDDLE" || p.teamPosition === "JUNGLE" || p.summoner1Id === SMITE_SPELL_ID || p.summoner2Id === SMITE_SPELL_ID
   );
 
   let hasLethality = false;
@@ -550,6 +552,8 @@ app.get("/api/build-stats", async (req, res) => {
     const adHpAlly = { wins: 0, losses: 0 };
     let skipped = 0;
     let nonClassicSkipped = 0;
+    let anyLethalityCount = 0; // games where SOMEONE's mid/jg went lethality (either side)
+    let anyBruiserCount = 0;   // games where SOMEONE's mid/jg went bruiser (either side)
 
     // Only Summoner's Rift queues actually have a real mid/jungle split
     // (ARAM has no Smite and blank teamPosition, Arena has no roles at all,
@@ -568,6 +572,9 @@ app.get("/api/build-stats", async (req, res) => {
 
       const ownBuild = classifyTeamBuild(ownTeam, lethalityIds, adHpIds);
       const enemyBuild = classifyTeamBuild(enemyTeam, lethalityIds, adHpIds);
+
+      if (ownBuild.hasLethality || enemyBuild.hasLethality) anyLethalityCount++;
+      if (ownBuild.hasBruiser || enemyBuild.hasBruiser) anyBruiserCount++;
 
       let counted = false;
 
@@ -597,6 +604,8 @@ app.get("/api/build-stats", async (req, res) => {
       skipped,
       nonClassicSkipped,
       itemsResolved: { lethality: lethalityIds.size, adHp: adHpIds.size },
+      anyLethalityCount,
+      anyBruiserCount,
     });
   } catch (err) {
     console.error(err);
