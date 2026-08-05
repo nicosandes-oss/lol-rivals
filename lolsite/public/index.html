@@ -23,7 +23,13 @@
   body {
     margin: 0;
     font-family: 'Segoe UI', system-ui, sans-serif;
-    background: var(--bg);
+    background:
+    linear-gradient(rgba(8, 12, 20, 0.35), rgba(8, 12, 20, 0.35)),
+    url("/sitethemebackground.png");
+background-size: cover;
+background-position: center;
+background-repeat: no-repeat;
+background-attachment: fixed;
     color: var(--text);
     padding: 28px 20px 60px;
   }
@@ -620,14 +626,57 @@
       }
     }
 
+    function buildMatchPlayerHtml(p, colorVar) {
+      const icons = p.items.map((id) => {
+        const isLethality = p.lethalityItems.includes(id);
+        const isBruiser = p.bruiserItems.includes(id);
+        const highlightColor = isLethality ? "var(--accent-a)" : isBruiser ? "var(--accent-b)" : "transparent";
+        const style = isLethality || isBruiser
+          ? `box-shadow: 0 0 0 2px ${highlightColor}; border-radius: 5px;`
+          : "";
+        return `<img class="item-icon" style="${style}" src="${itemIconUrl(id)}" alt="" loading="lazy" />`;
+      }).join("");
+      return `
+        <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
+          <span style="font-size:12px; color:${colorVar}; min-width:70px;">${p.position === "JUNGLE" ? "Jungle" : "Mid"} &middot; ${p.champion}</span>
+          <div style="display:flex; gap:3px;">${icons || '<span style="font-size:11px; color:var(--text-dim);">no items</span>'}</div>
+        </div>
+      `;
+    }
+
+    function buildMatchRowHtml(m) {
+      const resultClass = m.win ? "win" : "loss";
+      const resultLabel = m.win ? "Victory" : "Defeat";
+      return `
+        <div style="border: 1px solid var(--hairline); border-radius: 8px; padding: 10px 12px; margin-top: 8px;">
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+            <span class="pill ${resultClass}">${resultLabel}</span>
+            <span style="font-size:12px; color:var(--text-dim);">${m.durationMin}m &middot; ${timeAgo(m.gameCreation)}</span>
+          </div>
+          <div>
+            <div style="font-size:11px; color:var(--text-dim); margin-bottom:4px;">Your team</div>
+            ${m.ownPlayers.map((p) => buildMatchPlayerHtml(p, "var(--accent-b)")).join("")}
+          </div>
+          <div style="margin-top:6px;">
+            <div style="font-size:11px; color:var(--text-dim); margin-bottom:4px;">Enemy team</div>
+            ${m.enemyPlayers.map((p) => buildMatchPlayerHtml(p, "var(--accent-a)")).join("")}
+          </div>
+        </div>
+      `;
+    }
+
+    function buildMatchListHtml(matches) {
+      if (!matches || matches.length === 0) return "";
+      return `<div style="margin-top:4px;">${matches.map(buildMatchRowHtml).join("")}</div>`;
+    }
+
     function renderBuildStats(data, name) {
       const { lethalityAlly, adHpAlly, lookbackDays, truncated, skipped } = data;
       const totalGames = lethalityAlly.wins + lethalityAlly.losses + adHpAlly.wins + adHpAlly.losses;
 
       if (totalGames === 0) {
         const { lethality, adHp } = data.itemsResolved || {};
-        buildStatsResultsEl.innerHTML = `<div class="status-msg">No clean lethality-vs-bruiser matchup (mid+jungle) in the last ${lookbackDays} days. Checked ${data.totalMatchesChecked} game${data.totalMatchesChecked === 1 ? "" : "s"}, ${data.nonClassicSkipped || 0} weren't Summoner's Rift (ARAM/Arena/etc, skipped), ${skipped} had mixed or unclear builds. Items recognized: ${lethality} lethality, ${adHp} bruiser. Lethality appeared (either side) in ${data.anyLethalityCount || 0} games; bruiser appeared in ${data.anyBruiserCount || 0} games.</div>
-          <pre style="white-space: pre-wrap; font-size: 11px; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 6px; margin-top: 8px; overflow-x: auto;">${JSON.stringify(data.debugSample, null, 2)}</pre>`;
+        buildStatsResultsEl.innerHTML = `<div class="status-msg">No clean lethality-vs-bruiser matchup (mid+jungle) in the last ${lookbackDays} days. Checked ${data.totalMatchesChecked} game${data.totalMatchesChecked === 1 ? "" : "s"}, ${data.nonClassicSkipped || 0} weren't Summoner's Rift (ARAM/Arena/etc, skipped), ${skipped} had mixed or unclear builds. Items recognized: ${lethality} lethality, ${adHp} bruiser. Lethality appeared (either side) in ${data.anyLethalityCount || 0} games; bruiser appeared in ${data.anyBruiserCount || 0} games.</div>`;
         return;
       }
 
@@ -636,7 +685,9 @@
           <button class="copy-link-btn" id="buildStatsCopyBtn">Copy link to this result</button>
         </div>
         ${buildWrBar(name, "team lethality vs enemy bruiser", lethalityAlly)}
+        ${buildMatchListHtml(lethalityAlly.matches)}
         ${buildWrBar(name, "team bruiser vs enemy lethality", adHpAlly)}
+        ${buildMatchListHtml(adHpAlly.matches)}
         <div class="wr-bar-caption" style="margin-top: 4px;">
           last ${lookbackDays} days &middot; ${skipped} game${skipped === 1 ? "" : "s"} skipped (mixed or unclear builds)${truncated ? " &middot; showing most recent matches checked" : ""}
         </div>
