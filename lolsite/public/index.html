@@ -626,7 +626,7 @@
 
       if (totalGames === 0) {
         const { lethality, adHp } = data.itemsResolved || {};
-        buildStatsResultsEl.innerHTML = `<div class="status-msg">No clean lethality-vs-bruiser matchup (mid+jungle) in the last ${lookbackDays} days. Checked ${data.totalMatchesChecked} game${data.totalMatchesChecked === 1 ? "" : "s"}, ${data.nonClassicSkipped || 0} weren't Summoner's Rift (ARAM/Arena/etc, skipped), ${skipped} had mixed or unclear builds. Items recognized: ${lethality} lethality, ${adHp} bruiser.</div>`;
+        buildStatsResultsEl.innerHTML = `<div class="status-msg">No clean lethality-vs-bruiser matchup (mid+jungle) in the last ${lookbackDays} days. Checked ${data.totalMatchesChecked} game${data.totalMatchesChecked === 1 ? "" : "s"}, ${data.nonClassicSkipped || 0} weren't Summoner's Rift (ARAM/Arena/etc, skipped), ${skipped} had mixed or unclear builds. Items recognized: ${lethality} lethality, ${adHp} bruiser. Lethality appeared (either side) in ${data.anyLethalityCount || 0} games; bruiser appeared in ${data.anyBruiserCount || 0} games.</div>`;
         return;
       }
 
