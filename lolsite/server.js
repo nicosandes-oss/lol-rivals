@@ -554,6 +554,11 @@ app.get("/api/build-stats", async (req, res) => {
     let nonClassicSkipped = 0;
     let anyLethalityCount = 0; // games where SOMEONE's mid/jg went lethality (either side)
     let anyBruiserCount = 0;   // games where SOMEONE's mid/jg went bruiser (either side)
+    const debugSample = []; // raw detection detail for the first few games, for troubleshooting
+
+    // Reverse lookup (id -> name) purely for readable debug output below.
+    const idToItemName = {};
+    for (const [name, id] of Object.entries(itemNameToId)) idToItemName[id] = name;
 
     // Only Summoner's Rift queues actually have a real mid/jungle split
     // (ARAM has no Smite and blank teamPosition, Arena has no roles at all,
@@ -561,7 +566,7 @@ app.get("/api/build-stats", async (req, res) => {
     // 400 = Normal Draft, 420 = Ranked Solo/Duo, 430 = Normal Blind, 440 = Ranked Flex, 490 = Normal (Quickplay)
     const CLASSIC_SR_QUEUE_IDS = new Set([400, 420, 430, 440, 490]);
 
-    await getMatchesBatched(capped, continent, (matchData) => {
+    await getMatchesBatched(capped, continent, (matchData, matchId) => {
       if (!CLASSIC_SR_QUEUE_IDS.has(matchData.info.queueId)) { nonClassicSkipped++; return; }
 
       const self = matchData.info.participants.find((pp) => pp.puuid === puuid);
@@ -572,6 +577,27 @@ app.get("/api/build-stats", async (req, res) => {
 
       const ownBuild = classifyTeamBuild(ownTeam, lethalityIds, adHpIds);
       const enemyBuild = classifyTeamBuild(enemyTeam, lethalityIds, adHpIds);
+
+      if (debugSample.length < 3) {
+        const describe = (team) =>
+          team
+            .filter((p) => p.teamPosition === "MIDDLE" || p.teamPosition === "JUNGLE" || p.summoner1Id === SMITE_SPELL_ID || p.summoner2Id === SMITE_SPELL_ID)
+            .map((p) => ({
+              champion: p.championName,
+              teamPosition: p.teamPosition,
+              hasSmite: p.summoner1Id === SMITE_SPELL_ID || p.summoner2Id === SMITE_SPELL_ID,
+              items: [p.item0, p.item1, p.item2, p.item3, p.item4, p.item5].filter(Boolean).map((id) => idToItemName[id] || id),
+            }));
+        debugSample.push({
+          matchId,
+          queueId: matchData.info.queueId,
+          gameCreation: matchData.info.gameCreation,
+          own: describe(ownTeam),
+          enemy: describe(enemyTeam),
+          ownBuild,
+          enemyBuild,
+        });
+      }
 
       if (ownBuild.hasLethality || enemyBuild.hasLethality) anyLethalityCount++;
       if (ownBuild.hasBruiser || enemyBuild.hasBruiser) anyBruiserCount++;
@@ -606,6 +632,7 @@ app.get("/api/build-stats", async (req, res) => {
       itemsResolved: { lethality: lethalityIds.size, adHp: adHpIds.size },
       anyLethalityCount,
       anyBruiserCount,
+      debugSample,
     });
   } catch (err) {
     console.error(err);
