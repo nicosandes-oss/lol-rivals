@@ -237,10 +237,12 @@ async function getItemNameToIdMap() {
 const BUILD_CLASSIFICATION_THRESHOLD = 1;
 
 // Looks at a team's mid + jungle players individually (item0-item5 each;
-// item6 is the trinket, skipped). Returns { hasLethality, hasBruiser } —
-// true if EITHER player on their own hit the threshold for that bucket.
-// The two flags aren't mutually exclusive: a team can show both if, say,
-// jungle went lethality and mid went bruiser.
+// item6 is the trinket, skipped). Returns { hasLethality, hasBruiser, players }
+// — hasLethality/hasBruiser are true if EITHER player on their own hit the
+// threshold for that bucket (not mutually exclusive: a team can show both if,
+// say, jungle went lethality and mid went bruiser). players has full detail
+// per relevant player for display purposes (their items, and which of those
+// specifically counted as lethality/bruiser).
 function classifyTeamBuild(teamParticipants, lethalityIds, adHpIds) {
   const relevant = teamParticipants.filter(
     (p) => p.teamPosition === "MIDDLE" || p.teamPosition === "JUNGLE" || p.summoner1Id === SMITE_SPELL_ID || p.summoner2Id === SMITE_SPELL_ID
@@ -248,20 +250,26 @@ function classifyTeamBuild(teamParticipants, lethalityIds, adHpIds) {
 
   let hasLethality = false;
   let hasBruiser = false;
+  const players = [];
 
   for (const p of relevant) {
-    const items = [p.item0, p.item1, p.item2, p.item3, p.item4, p.item5];
-    let playerLethalityCount = 0;
-    let playerAdHpCount = 0;
-    for (const itemId of items) {
-      if (lethalityIds.has(itemId)) playerLethalityCount++;
-      if (adHpIds.has(itemId)) playerAdHpCount++;
-    }
-    if (playerLethalityCount >= BUILD_CLASSIFICATION_THRESHOLD) hasLethality = true;
-    if (playerAdHpCount >= BUILD_CLASSIFICATION_THRESHOLD) hasBruiser = true;
+    const items = [p.item0, p.item1, p.item2, p.item3, p.item4, p.item5].filter((i) => i && i !== 0);
+    const lethalityItems = items.filter((id) => lethalityIds.has(id));
+    const bruiserItems = items.filter((id) => adHpIds.has(id));
+
+    if (lethalityItems.length >= BUILD_CLASSIFICATION_THRESHOLD) hasLethality = true;
+    if (bruiserItems.length >= BUILD_CLASSIFICATION_THRESHOLD) hasBruiser = true;
+
+    players.push({
+      champion: p.championName,
+      position: p.teamPosition === "JUNGLE" || p.summoner1Id === SMITE_SPELL_ID || p.summoner2Id === SMITE_SPELL_ID ? "JUNGLE" : "MIDDLE",
+      items,
+      lethalityItems,
+      bruiserItems,
+    });
   }
 
-  return { hasLethality, hasBruiser };
+  return { hasLethality, hasBruiser, players };
 }
 
 // Smite's summonerId in Riot's API. This is one of the oldest, most stable
@@ -555,17 +563,12 @@ app.get("/api/build-stats", async (req, res) => {
     const capped = matchIds.slice(0, MAX_SHARED_MATCHES_TO_FETCH);
     const truncated = matchIds.length > MAX_SHARED_MATCHES_TO_FETCH;
 
-    const lethalityAlly = { wins: 0, losses: 0 };
-    const adHpAlly = { wins: 0, losses: 0 };
+    const lethalityAlly = { wins: 0, losses: 0, matches: [] };
+    const adHpAlly = { wins: 0, losses: 0, matches: [] };
     let skipped = 0;
     let nonClassicSkipped = 0;
     let anyLethalityCount = 0; // games where SOMEONE's mid/jg went lethality (either side)
     let anyBruiserCount = 0;   // games where SOMEONE's mid/jg went bruiser (either side)
-    const debugSample = []; // raw detection detail for the first few games, for troubleshooting
-
-    // Reverse lookup (id -> name) purely for readable debug output below.
-    const idToItemName = {};
-    for (const [name, id] of Object.entries(itemNameToId)) idToItemName[id] = name;
 
     // Only Summoner's Rift queues actually have a real mid/jungle split
     // (ARAM has no Smite and blank teamPosition, Arena has no roles at all,
@@ -585,45 +588,38 @@ app.get("/api/build-stats", async (req, res) => {
       const ownBuild = classifyTeamBuild(ownTeam, lethalityIds, adHpIds);
       const enemyBuild = classifyTeamBuild(enemyTeam, lethalityIds, adHpIds);
 
-      if (debugSample.length < 3) {
-        const describe = (team) =>
-          team
-            .filter((p) => p.teamPosition === "MIDDLE" || p.teamPosition === "JUNGLE" || p.summoner1Id === SMITE_SPELL_ID || p.summoner2Id === SMITE_SPELL_ID)
-            .map((p) => ({
-              champion: p.championName,
-              teamPosition: p.teamPosition,
-              hasSmite: p.summoner1Id === SMITE_SPELL_ID || p.summoner2Id === SMITE_SPELL_ID,
-              items: [p.item0, p.item1, p.item2, p.item3, p.item4, p.item5].filter(Boolean).map((id) => idToItemName[id] || id),
-            }));
-        debugSample.push({
-          matchId,
-          queueId: matchData.info.queueId,
-          gameCreation: matchData.info.gameCreation,
-          own: describe(ownTeam),
-          enemy: describe(enemyTeam),
-          ownBuild,
-          enemyBuild,
-        });
-      }
-
       if (ownBuild.hasLethality || enemyBuild.hasLethality) anyLethalityCount++;
       if (ownBuild.hasBruiser || enemyBuild.hasBruiser) anyBruiserCount++;
 
       let counted = false;
 
+      const matchSummary = {
+        matchId,
+        gameCreation: matchData.info.gameCreation,
+        durationMin: Math.round(matchData.info.gameDuration / 60),
+        win: self.win,
+        ownPlayers: ownBuild.players,
+        enemyPlayers: enemyBuild.players,
+      };
+
       // Own team showed lethality (mid or jg), enemy team showed bruiser (mid or jg).
       if (ownBuild.hasLethality && enemyBuild.hasBruiser) {
         if (self.win) lethalityAlly.wins++; else lethalityAlly.losses++;
+        lethalityAlly.matches.push(matchSummary);
         counted = true;
       }
       // The reverse: own team showed bruiser, enemy team showed lethality.
       if (ownBuild.hasBruiser && enemyBuild.hasLethality) {
         if (self.win) adHpAlly.wins++; else adHpAlly.losses++;
+        adHpAlly.matches.push(matchSummary);
         counted = true;
       }
 
       if (!counted) skipped++;
     });
+
+    lethalityAlly.matches.sort((a, b) => b.gameCreation - a.gameCreation);
+    adHpAlly.matches.sort((a, b) => b.gameCreation - a.gameCreation);
 
     recordSearchedName(riotId);
 
@@ -639,7 +635,6 @@ app.get("/api/build-stats", async (req, res) => {
       itemsResolved: { lethality: lethalityIds.size, adHp: adHpIds.size },
       anyLethalityCount,
       anyBruiserCount,
-      debugSample,
     });
   } catch (err) {
     console.error(err);
