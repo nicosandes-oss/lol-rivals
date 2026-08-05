@@ -447,7 +447,7 @@ background-attachment: fixed;
         championList = Object.values(champData.data).map((c) => ({ id: c.id, name: c.name }));
         for (const [id, data] of Object.entries(itemData.data)) itemNames[id] = data.name;
       })
-      .catch(() => {});
+      .catch((err) => console.error("Failed to load champion/item data from Data Dragon:", err));
 
     function champIconUrl(championName) {
       return `https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/img/champion/${championName}.png`;
