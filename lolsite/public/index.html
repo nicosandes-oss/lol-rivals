@@ -237,8 +237,30 @@ background-attachment: fixed;
   .stat-row b { color: var(--text); font-weight: 700; }
   .item-row { display: flex; gap: 4px; flex-wrap: wrap; }
   .detail-player.right .item-row { justify-content: flex-end; }
-  .item-icon { width: 26px; height: 26px; border-radius: 5px; background: var(--surface); border: 1px solid var(--hairline); }
+  .item-icon { width: 26px; height: 26px; border-radius: 5px; background: var(--surface); border: 1px solid var(--hairline); cursor: default; }
   .item-icon.empty { background: var(--surface); opacity: 0.3; }
+
+  .item-hover-card {
+    position: fixed; z-index: 1000; width: 300px; max-width: calc(100vw - 24px);
+    background: var(--surface-raised); border: 1px solid var(--hairline); border-radius: 10px;
+    padding: 12px 14px; font-size: 12px; line-height: 1.55; color: var(--text);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.55); pointer-events: none; display: none;
+  }
+  .item-hover-card.visible { display: block; }
+  .item-hover-card-header {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px solid var(--hairline);
+  }
+  .item-hover-card-name { font-size: 13px; font-weight: 700; color: var(--gold); }
+  .item-hover-card-gold { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+  .item-hover-card-body mainText { display: block; }
+  .item-hover-card-body stats { display: block; margin: 6px 0; color: var(--text-dim); }
+  .item-hover-card-body passive, .item-hover-card-body active {
+    display: block; margin-top: 6px; color: var(--accent-b); font-weight: 600;
+  }
+  .item-hover-card-body attention { color: var(--gold); font-weight: 700; }
+  .item-hover-card-body rules { display: block; margin-top: 6px; color: var(--text-dim); font-size: 11px; }
+  .item-hover-card-body scaleLevel { color: var(--accent-a); }
 
   .empty-state { text-align: center; padding: 40px 20px; color: var(--text-dim); }
 
@@ -267,6 +289,7 @@ background-attachment: fixed;
 </style>
 </head>
 <body>
+  <div class="item-hover-card" id="itemHoverCard"></div>
   <div class="shell">
     <div class="eyebrow">League of Legends</div>
     <h1>Leagues<span>PvPwr</span></h1>
@@ -431,7 +454,7 @@ background-attachment: fixed;
     // point at a stale patch number.
     let ddragonVersion = "14.1.1"; // fallback if the version fetch fails
     let championList = []; // [{ id: "Khazix", name: "Kha'Zix" }, ...] populated below
-    let itemNames = {}; // { 6631: "Stridebreaker", ... } populated below, used for icon tooltips
+    let itemDetails = {}; // { 6631: { name, description, gold }, ... } populated below, used for the item hover card
 
     const championListReady = fetch("https://ddragon.leagueoflegends.com/api/versions.json")
       .then((r) => r.json())
@@ -445,7 +468,13 @@ background-attachment: fixed;
       .then(([champRes, itemRes]) => Promise.all([champRes.json(), itemRes.json()]))
       .then(([champData, itemData]) => {
         championList = Object.values(champData.data).map((c) => ({ id: c.id, name: c.name }));
-        for (const [id, data] of Object.entries(itemData.data)) itemNames[id] = data.name;
+        for (const [id, data] of Object.entries(itemData.data)) {
+          itemDetails[id] = {
+            name: data.name,
+            description: data.description || "",
+            gold: data.gold ? data.gold.total : null,
+          };
+        }
       })
       .catch((err) => console.error("Failed to load champion/item data from Data Dragon:", err));
 
@@ -456,8 +485,59 @@ background-attachment: fixed;
       return `https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/img/item/${itemId}.png`;
     }
     function itemTooltip(itemId) {
-      return itemNames[itemId] || "";
+      const d = itemDetails[itemId];
+      return d ? d.name : "";
     }
+
+    // ---------------------------------------------------------------------
+    // Item hover card (rich tooltip: name, gold cost, stats, passive text)
+    // ---------------------------------------------------------------------
+    // Uses event delegation on the document so it automatically works for
+    // any current or future item icon with a data-item-id attribute —
+    // no per-render listener wiring needed.
+    const itemHoverCard = document.getElementById("itemHoverCard");
+
+    function showItemHoverCard(itemId, x, y) {
+      const d = itemDetails[itemId];
+      if (!d) return;
+      const goldHtml = d.gold ? `<span class="item-hover-card-gold">${d.gold}g</span>` : "";
+      itemHoverCard.innerHTML = `
+        <div class="item-hover-card-header">
+          <span class="item-hover-card-name">${d.name}</span>
+          ${goldHtml}
+        </div>
+        <div class="item-hover-card-body">${d.description}</div>
+      `;
+      itemHoverCard.classList.add("visible");
+      positionItemHoverCard(x, y);
+    }
+
+    function positionItemHoverCard(x, y) {
+      const margin = 14;
+      const rect = itemHoverCard.getBoundingClientRect();
+      let left = x + margin;
+      let top = y + margin;
+      if (left + rect.width > window.innerWidth - 8) left = x - rect.width - margin;
+      if (top + rect.height > window.innerHeight - 8) top = y - rect.height - margin;
+      itemHoverCard.style.left = `${Math.max(8, left)}px`;
+      itemHoverCard.style.top = `${Math.max(8, top)}px`;
+    }
+
+    function hideItemHoverCard() {
+      itemHoverCard.classList.remove("visible");
+    }
+
+    document.addEventListener("mouseover", (e) => {
+      const el = e.target.closest("[data-item-id]");
+      if (el) showItemHoverCard(el.getAttribute("data-item-id"), e.clientX, e.clientY);
+    });
+    document.addEventListener("mousemove", (e) => {
+      if (itemHoverCard.classList.contains("visible")) positionItemHoverCard(e.clientX, e.clientY);
+    });
+    document.addEventListener("mouseout", (e) => {
+      const el = e.target.closest("[data-item-id]");
+      if (el && !el.contains(e.relatedTarget)) hideItemHoverCard();
+    });
 
     // ---------------------------------------------------------------------
     // Champion win/loss lookup
@@ -655,7 +735,7 @@ background-attachment: fixed;
           ? `box-shadow: 0 0 0 2px ${highlightColor}; border-radius: 5px;`
           : "";
         const suffix = isLethality ? " (lethality)" : isBruiser ? " (bruiser)" : "";
-        return `<img class="item-icon" style="${style}" src="${itemIconUrl(id)}" alt="" title="${itemTooltip(id)}${suffix}" loading="lazy" />`;
+        return `<img class="item-icon" style="${style}" data-item-id="${id}" src="${itemIconUrl(id)}" alt="" title="${suffix.trim()}" loading="lazy" />`;
       }).join("");
       return `
         <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
@@ -767,11 +847,11 @@ background-attachment: fixed;
       let html = "";
       for (const id of slots) {
         html += id
-          ? `<img class="item-icon" src="${itemIconUrl(id)}" alt="" title="${itemTooltip(id)}" loading="lazy" />`
+          ? `<img class="item-icon" data-item-id="${id}" src="${itemIconUrl(id)}" alt="" loading="lazy" />`
           : `<div class="item-icon empty"></div>`;
       }
       if (p.trinket) {
-        html += `<img class="item-icon" src="${itemIconUrl(p.trinket)}" alt="" title="${itemTooltip(p.trinket)}" loading="lazy" />`;
+        html += `<img class="item-icon" data-item-id="${p.trinket}" src="${itemIconUrl(p.trinket)}" alt="" loading="lazy" />`;
       }
       return `<div class="item-row">${html}</div>`;
     }
