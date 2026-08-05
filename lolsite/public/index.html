@@ -431,16 +431,21 @@ background-attachment: fixed;
     // point at a stale patch number.
     let ddragonVersion = "14.1.1"; // fallback if the version fetch fails
     let championList = []; // [{ id: "Khazix", name: "Kha'Zix" }, ...] populated below
+    let itemNames = {}; // { 6631: "Stridebreaker", ... } populated below, used for icon tooltips
 
     const championListReady = fetch("https://ddragon.leagueoflegends.com/api/versions.json")
       .then((r) => r.json())
       .then((versions) => {
         ddragonVersion = versions[0];
-        return fetch(`https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/data/en_US/champion.json`);
+        return Promise.all([
+          fetch(`https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/data/en_US/champion.json`),
+          fetch(`https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/data/en_US/item.json`),
+        ]);
       })
-      .then((r) => r.json())
-      .then((data) => {
-        championList = Object.values(data.data).map((c) => ({ id: c.id, name: c.name }));
+      .then(([champRes, itemRes]) => Promise.all([champRes.json(), itemRes.json()]))
+      .then(([champData, itemData]) => {
+        championList = Object.values(champData.data).map((c) => ({ id: c.id, name: c.name }));
+        for (const [id, data] of Object.entries(itemData.data)) itemNames[id] = data.name;
       })
       .catch(() => {});
 
@@ -449,6 +454,9 @@ background-attachment: fixed;
     }
     function itemIconUrl(itemId) {
       return `https://ddragon.leagueoflegends.com/cdn/${ddragonVersion}/img/item/${itemId}.png`;
+    }
+    function itemTooltip(itemId) {
+      return itemNames[itemId] || "";
     }
 
     // ---------------------------------------------------------------------
@@ -646,7 +654,8 @@ background-attachment: fixed;
         const style = isLethality || isBruiser
           ? `box-shadow: 0 0 0 2px ${highlightColor}; border-radius: 5px;`
           : "";
-        return `<img class="item-icon" style="${style}" src="${itemIconUrl(id)}" alt="" loading="lazy" />`;
+        const suffix = isLethality ? " (lethality)" : isBruiser ? " (bruiser)" : "";
+        return `<img class="item-icon" style="${style}" src="${itemIconUrl(id)}" alt="" title="${itemTooltip(id)}${suffix}" loading="lazy" />`;
       }).join("");
       return `
         <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
@@ -758,11 +767,11 @@ background-attachment: fixed;
       let html = "";
       for (const id of slots) {
         html += id
-          ? `<img class="item-icon" src="${itemIconUrl(id)}" alt="" loading="lazy" />`
+          ? `<img class="item-icon" src="${itemIconUrl(id)}" alt="" title="${itemTooltip(id)}" loading="lazy" />`
           : `<div class="item-icon empty"></div>`;
       }
       if (p.trinket) {
-        html += `<img class="item-icon" src="${itemIconUrl(p.trinket)}" alt="" loading="lazy" />`;
+        html += `<img class="item-icon" src="${itemIconUrl(p.trinket)}" alt="" title="${itemTooltip(p.trinket)}" loading="lazy" />`;
       }
       return `<div class="item-row">${html}</div>`;
     }
