@@ -549,8 +549,17 @@ app.get("/api/build-stats", async (req, res) => {
     const lethalityAlly = { wins: 0, losses: 0 };
     const adHpAlly = { wins: 0, losses: 0 };
     let skipped = 0;
+    let nonClassicSkipped = 0;
+
+    // Only Summoner's Rift queues actually have a real mid/jungle split
+    // (ARAM has no Smite and blank teamPosition, Arena has no roles at all,
+    // etc.) — including those would silently skip every single one of them.
+    // 400 = Normal Draft, 420 = Ranked Solo/Duo, 430 = Normal Blind, 440 = Ranked Flex, 490 = Normal (Quickplay)
+    const CLASSIC_SR_QUEUE_IDS = new Set([400, 420, 430, 440, 490]);
 
     await getMatchesBatched(capped, continent, (matchData) => {
+      if (!CLASSIC_SR_QUEUE_IDS.has(matchData.info.queueId)) { nonClassicSkipped++; return; }
+
       const self = matchData.info.participants.find((pp) => pp.puuid === puuid);
       if (!self) { skipped++; return; }
 
@@ -586,6 +595,7 @@ app.get("/api/build-stats", async (req, res) => {
       truncated,
       totalMatchesChecked: capped.length,
       skipped,
+      nonClassicSkipped,
       itemsResolved: { lethality: lethalityIds.size, adHp: adHpIds.size },
     });
   } catch (err) {
