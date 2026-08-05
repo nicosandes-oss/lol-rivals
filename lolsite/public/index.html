@@ -20,22 +20,13 @@
     --stripe-a-wins: #E63DD8;
   }
   * { box-sizing: border-box; }
-body {
+  body {
     margin: 0;
     font-family: 'Segoe UI', system-ui, sans-serif;
-
-    background:
-        linear-gradient(rgba(8, 12, 20, 0.30), rgba(8, 12, 20, 0.30)),
-        url("sitethemebackground.png");
-
-    background-size: cover;
-    background-position: center;
-    background-repeat: no-repeat;
-    background-attachment: fixed;
-
+    background: var(--bg);
     color: var(--text);
     padding: 28px 20px 60px;
-}
+  }
   .shell { max-width: 760px; margin: 0 auto; }
   .eyebrow {
     font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase;
@@ -635,7 +626,7 @@ body {
 
       if (totalGames === 0) {
         const { lethality, adHp } = data.itemsResolved || {};
-        buildStatsResultsEl.innerHTML = `<div class="status-msg">No clean lethality-vs-bruiser matchup (mid+jungle) in the last ${lookbackDays} days. Checked ${data.totalMatchesChecked} game${data.totalMatchesChecked === 1 ? "" : "s"}, all ${skipped} skipped (mixed or unclear builds, or player not found in match). Items recognized: ${lethality} lethality, ${adHp} bruiser.</div>`;
+        buildStatsResultsEl.innerHTML = `<div class="status-msg">No clean lethality-vs-bruiser matchup (mid+jungle) in the last ${lookbackDays} days. Checked ${data.totalMatchesChecked} game${data.totalMatchesChecked === 1 ? "" : "s"}, ${data.nonClassicSkipped || 0} weren't Summoner's Rift (ARAM/Arena/etc, skipped), ${skipped} had mixed or unclear builds. Items recognized: ${lethality} lethality, ${adHp} bruiser.</div>`;
         return;
       }
 
