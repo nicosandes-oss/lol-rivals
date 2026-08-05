@@ -55,6 +55,18 @@ background-attachment: fixed;
     padding: 24px 22px;
     margin-top: 32px;
   }
+  .champ-stats-card.wide-card {
+    max-width: 1300px;
+    width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .build-stats-columns {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: start;
+  }
+  @media (max-width: 900px) {
+    .build-stats-columns { grid-template-columns: 1fr; }
+  }
   .champ-stats-title {
     text-align: center; font-size: 13px; font-weight: 700; letter-spacing: 0.06em;
     text-transform: uppercase; color: var(--gold); margin-bottom: 18px;
@@ -309,19 +321,19 @@ background-attachment: fixed;
       <button class="search-btn" id="champStatsBtn">Check win rate</button>
       <div id="champStatsResults"></div>
     </div>
+  </div>
 
-    <div class="champ-stats-card">
-      <div class="champ-stats-title">Summoner's WR: lethality team vs bruiser team (mid+jungle)</div>
-      <div class="champ-stats-row">
-        <div class="input-wrap">
-          <span class="fighter-label" style="color: var(--text-dim)">Summoner</span>
-          <div class="fighter-field"><input id="buildStatsName" type="text" placeholder="Name#Tag" autocomplete="off" /></div>
-          <div class="suggest-list" id="suggestBuildName"></div>
-        </div>
+  <div class="champ-stats-card wide-card">
+    <div class="champ-stats-title">Summoner's WR: lethality team vs bruiser team (mid+jungle)</div>
+    <div class="champ-stats-row" style="max-width: 480px; margin-left: auto; margin-right: auto;">
+      <div class="input-wrap">
+        <span class="fighter-label" style="color: var(--text-dim)">Summoner</span>
+        <div class="fighter-field"><input id="buildStatsName" type="text" placeholder="Name#Tag" autocomplete="off" /></div>
+        <div class="suggest-list" id="suggestBuildName"></div>
       </div>
-      <button class="search-btn" id="buildStatsBtn">Check win rate</button>
-      <div id="buildStatsResults"></div>
     </div>
+    <div style="text-align: center;"><button class="search-btn" id="buildStatsBtn">Check win rate</button></div>
+    <div id="buildStatsResults"></div>
   </div>
 
   <script>
@@ -684,10 +696,16 @@ background-attachment: fixed;
         <div class="share-row">
           <button class="copy-link-btn" id="buildStatsCopyBtn">Copy link to this result</button>
         </div>
-        ${buildWrBar(name, "team lethality vs enemy bruiser", lethalityAlly)}
-        ${buildMatchListHtml(lethalityAlly.matches)}
-        ${buildWrBar(name, "team bruiser vs enemy lethality", adHpAlly)}
-        ${buildMatchListHtml(adHpAlly.matches)}
+        <div class="build-stats-columns">
+          <div>
+            ${buildWrBar(name, "team lethality vs enemy bruiser", lethalityAlly)}
+            ${buildMatchListHtml(lethalityAlly.matches)}
+          </div>
+          <div>
+            ${buildWrBar(name, "team bruiser vs enemy lethality", adHpAlly)}
+            ${buildMatchListHtml(adHpAlly.matches)}
+          </div>
+        </div>
         <div class="wr-bar-caption" style="margin-top: 4px;">
           last ${lookbackDays} days &middot; ${skipped} game${skipped === 1 ? "" : "s"} skipped (mixed or unclear builds)${truncated ? " &middot; showing most recent matches checked" : ""}
         </div>
