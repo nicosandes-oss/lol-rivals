@@ -4,8 +4,6 @@
 
 🌐 **Live Website:** https://lolrivals.com/
 
-images/s1.png
-
 ## Overview
 
 LoL Rivals is a League of Legends statistics website built around tools that are not commonly presented clearly or directly on existing League statistics websites.
